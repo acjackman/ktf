@@ -44,21 +44,21 @@ func (m Manifest) Bytes() []byte {
 	return m.file.Bytes()
 }
 
-func (m Manifest) setString(data map[string]interface{}, key, name string) error {
-	raw, exists := data[key]
-	if !exists {
-		return ErrMissingKey
-	}
+// func (m Manifest) setString(data map[string]interface{}, key, name string) error {
+// 	raw, exists := data[key]
+// 	if !exists {
+// 		return ErrMissingKey
+// 	}
 
-	decoded, ok := raw.(string)
-	if !ok {
-		log.Fatalf("Could not decode %v as string", raw)
-		return ErrDecode
-	}
+// 	decoded, ok := raw.(string)
+// 	if !ok {
+// 		log.Fatalf("Could not decode %v as string", raw)
+// 		return ErrDecode
+// 	}
 
-	m.body.SetAttributeValue(name, cty.StringVal(decoded))
-	return nil
-}
+// 	m.body.SetAttributeValue(name, cty.StringVal(decoded))
+// 	return nil
+// }
 
 func sortedKeys(data map[string]interface{}) []string {
 	keys := make([]string, 0, len(data))
@@ -71,96 +71,95 @@ func sortedKeys(data map[string]interface{}) []string {
 
 // func dispatchValue(raw any, t reflect.Type) (cty.Value, error) {
 // 	// t := reflect.TypeOf(decoded[k])
-
 // 	// if t == reflect.TypeOf(map[string]interface{}) {
-
 // 	// }
-
 // 	return nil, ErrUnknownType
 // }
 
-func (m Manifest) setObject(data map[string]interface{}, key, name string) error {
-	raw, exists := data[key]
-	if !exists {
-		return ErrMissingKey
+// func parseList(data []interface{}) []cty.Value {
+// 	contents := make([]cty.Value, len(data))
+
+// 	// use of MapOf method
+// 	var i interface{}
+// 	tm := reflect.MapOf(reflect.TypeOf("string"),
+// 		reflect.TypeOf(&i).Elem()).Kind()
+
+// 	for _, k := range sortedKeys(data) {
+// 		value := data[k]
+// 		t := reflect.TypeOf(value)
+
+// 		switch t.Kind() {
+// 		case reflect.String:
+// 			// log.Printf("Detected '%s' as string", k)
+// 			contents[k] = cty.StringVal(value.(string))
+// 			break
+// 		// case reflect.MapOf(string, any).Kind():
+// 		case tm:
+// 			// log.Printf("Detected '%s' as map", k)
+// 			child := parseMap(value.(map[string]interface{}))
+// 			contents[k] = cty.ObjectVal(child)
+// 			break
+// 		default:
+// 			// log.Printf("Could not decode '%s', unsupported type %q", k, t)
+// 			log.Printf("Key '%s' has unknown type %s", k, t)
+// 		}
+// 	}
+
+// 	return contents
+// }
+
+func parseList(data []interface{}) cty.Value {
+	n := len(data)
+	if n == 0 {
+		return cty.ListValEmpty(cty.String)
 	}
 
-	decoded, ok := raw.(map[string]interface{})
-	if !ok {
-		log.Fatalf("Could not decode %v as string", raw)
-		return ErrDecode
+	contents := make([]cty.Value, n)
+
+	for i, value := range data {
+		contents[i] = parseValue(value)
 	}
 
+	return cty.TupleVal(contents)
+}
+
+func parseObject(data map[string]interface{}) cty.Value {
 	contents := map[string]cty.Value{}
 
-	for _, k := range sortedKeys(decoded) {
-		value := decoded[k]
-		t := reflect.TypeOf(value)
-
-		switch t.Kind() {
-		case reflect.String:
-			// log.Printf("Detected '%s' as string", k)
-			contents[k] = cty.StringVal(value.(string))
-			break
-		case reflect.MapOf(string, interface):
-			log.Printf("Detected '%s' as map", k)
-
-		default:
-			// log.Printf("Could not decode '%s', unsupported type %q", k, t)
-			log.Printf("Key '%s' has unknown type %s", k, t)
-		}
+	for _, k := range sortedKeys(data) {
+		contents[k] = parseValue(data[k])
 	}
 
-	m.body.SetAttributeValue(name, cty.ObjectVal(contents))
-	return nil
+	return cty.ObjectVal(contents)
+}
+
+func parseValue(value any) cty.Value {
+	// Define a map type
+	var i interface{}
+	tm := reflect.MapOf(reflect.TypeOf("string"), reflect.TypeOf(&i).Elem()).Kind()
+	tl := reflect.SliceOf(reflect.TypeOf(&i).Elem()).Kind()
+
+	t := reflect.TypeOf(value)
+	switch t.Kind() {
+	case reflect.Bool:
+		return cty.BoolVal(value.(bool))
+	case reflect.String:
+		return cty.StringVal(value.(string))
+	case reflect.Int:
+		return cty.NumberIntVal(int64(value.(int)))
+	case tm:
+		return parseObject(value.(map[string]interface{}))
+	case tl:
+		return parseList(value.([]interface{}))
+	default:
+		// log.Printf("Could not decode '%s', unsupported type %q", k, t)
+		log.Printf("Unparseable type %s", t)
+		return cty.NullVal(cty.String)
+	}
 }
 
 func BuildManifest(data map[string]interface{}) ([]byte, error) {
 	m := *newManifest("this")
-
-	// body := m.block.Body()
-	var err error
-
-	err = m.setString(data, "apiVersion", "apiVersion")
-	if err != nil {
-		return nil, err
-	}
-
-	err = m.setString(data, "kind", "kind")
-	if err != nil {
-		return nil, err
-	}
-
-	err = m.setObject(data, "metadata", "metadata")
-	if err != nil {
-		return nil, err
-	}
-
-	// annotations := map[string]cty.Value{"controller-gen.kubebuilder.io/version": cty.StringVal("v0.13.0")}
-	// metadata := map[string]cty.Value{
-	// 	"name":        cty.StringVal("workerpools.workers.spacelift.io"),
-	// 	"annotations": cty.MapVal(annotations),
-	// }
-	// body.SetAttributeValue("metadata", cty.ObjectVal(metadata))
-
-	// body.SetAttributeValue("kind", cty.StringVal(data["kind"]))
-	// body.SetAttributeValue("metadata", cty.StringVal("boop"))
-	// body.SetAttributeValue("spec", cty.StringVal("boop"))
-
-	// bazBody.SetAttributeValue("foo", cty.NumberIntVal(10))
-	// bazBody.SetAttributeValue("beep", cty.StringVal("boop"))
-	// bazBody.SetAttributeValue("baz", cty.ListValEmpty(cty.String))
-
-	// keys := make([]string, 0, len(data))
-	// for k := range data {
-	// 	keys = append(keys, k)
-	// }
-	// sort.Strings(keys)
-
-	// for k := range keys {
-	// 	body.append
-	// }
-	// log.Printf("t1: %s\n", reflect.TypeOf(data["apiVersion"]))
-
+	m.body.SetAttributeValue("manifest", parseValue(data))
 	return m.Bytes(), nil
 }
