@@ -2,7 +2,8 @@ package ktf
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log"
 	"os"
 
 	"github.com/acjackman/ktf/pkg/ktf"
@@ -18,11 +19,23 @@ var rootCmd = &cobra.Command{
 Pass a terraform manifest`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		// YAML string stored in a variable
-		yamlString, err := ioutil.ReadFile(args[0])
+		// this does the trick
+		var inputReader io.Reader = cmd.InOrStdin()
+
+		// the argument received looks like a file, we try to open it
+		if len(args) > 0 && args[0] != "-" {
+			file, err := os.Open(args[0])
+			if err != nil {
+				log.Printf("failed open file: %v", err)
+				os.Exit(1)
+			}
+			inputReader = file
+		}
+
+		yamlString, err := io.ReadAll(inputReader)
 		if err != nil {
-			fmt.Println(err)
-			return
+			log.Printf("failed to read: %v", err)
+			os.Exit(1)
 		}
 
 		// Map to store the parsed YAML data
@@ -31,10 +44,15 @@ Pass a terraform manifest`,
 		// Unmarshal the YAML string into the data map
 		marshallErr := yaml.Unmarshal([]byte(yamlString), &data)
 		if marshallErr != nil {
-			fmt.Println(err)
+			log.Printf("Unable to unmarshal yaml: %v", err)
+			os.Exit(1)
 		}
 
 		code, err := ktf.BuildManifest(data)
+		if err != nil {
+			log.Printf("Error building HCL: %v", err)
+			os.Exit(1)
+		}
 
 		fmt.Printf("%s", code)
 	},
